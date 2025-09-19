@@ -1,4 +1,5 @@
-name: CI-Build
+name: CI-Build and Release
+
 on:
   push:
     branches:
@@ -6,18 +7,25 @@ on:
   pull_request:
     branches:
       - main
-  # --- THÊM KHỐI LỆNH NÀY ĐỂ CHẠY HÀNG NGÀY ---
   schedule:
-    # Chạy vào lúc 00:00 UTC (7:00 sáng giờ Việt Nam) mỗi ngày
     - cron: '0 0 * * *'
+  # Thêm trigger này để có thể tạo release thủ công nếu muốn
+  workflow_dispatch:
+
+# --- THÊM QUYỀN NÀY ĐỂ WORKFLOW CÓ THỂ TẠO RELEASE ---
+permissions:
+  contents: write
 
 jobs:
   build:
     name: Build Module
     runs-on: ubuntu-latest
+    # --- THÊM OUTPUTS ĐỂ TRUYỀN VERSION SANG JOB SAU ---
+    outputs:
+      version: ${{ steps.module-version.outputs.version }}
     steps:
-      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
-      - uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9 # v4.2.1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 11
@@ -31,11 +39,57 @@ jobs:
         run: |
           MODULE_VERSION=$(cat module.gradle | grep "moduleVersion =" | awk -F'"' '{print $2}')
           echo "version=$MODULE_VERSION" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+      - uses: actions/upload-artifact@v4
         with:
-          name: ZygiskFrida-${{ steps.module-version.outputs.version }}-release
+          name: ZygiskFrida-release
           path: out/magisk_module_zygisk_release
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+      - uses: actions/upload-artifact@v4
         with:
-          name: ZygiskFrida-${{ steps.module-version.outputs.version }}-riru-release
+          name: ZygiskFrida-riru-release
           path: out/magisk_module_riru_release
+
+  # --- THÊM JOB MỚI ĐỂ TẠO RELEASE ---
+  release:
+    name: Create Release
+    # Chạy job này sau khi job 'build' hoàn thành
+    needs: build
+    runs-on: ubuntu-latest
+    # Chỉ chạy job này khi push lên branch 'main', không chạy cho pull request
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Download Zygisk artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ZygiskFrida-release
+          path: zygisk-module
+      - name: Download Riru artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ZygiskFrida-riru-release
+          path: riru-module
+
+      - name: Get module version
+        id: get_version
+        run: echo "version=${{ needs.build.outputs.version }}" >> $GITHUB_OUTPUT
+
+      - name: Zip the artifacts
+        run: |
+          zip -r ZygiskFrida-${{ steps.get_version.outputs.version }}.zip ./zygisk-module/*
+          zip -r ZygiskFrida-riru-${{ steps.get_version.outputs.version }}.zip ./riru-module/*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Các file sẽ được đính kèm vào release
+          files: |
+            ZygiskFrida-${{ steps.get_version.outputs.version }}.zip
+            ZygiskFrida-riru-${{ steps.get_version.outputs.version }}.zip
+          # Tên của tag Git, ví dụ: v1.0.0
+          tag_name: v${{ steps.get_version.outputs.version }}
+          # Tên của Release, ví dụ: Module v1.0.0
+          name: Module v${{ steps.get_version.outputs.version }}
+          # Ghi chú cho release, bạn có thể tùy chỉnh
+          body: |
+            Auto-generated release for version ${{ steps.get_version.outputs.version }}.
+            - Zygisk Module
+            - Riru Module
