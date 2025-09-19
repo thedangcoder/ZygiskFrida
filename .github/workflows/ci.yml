@@ -6,6 +6,10 @@ on:
   pull_request:
     branches:
       - main
+  # --- THÊM KHỐI LỆNH NÀY ĐỂ CHẠY HÀNG NGÀY ---
+  schedule:
+    # Chạy vào lúc 00:00 UTC (7:00 sáng giờ Việt Nam) mỗi ngày
+    - cron: '0 0 * * *'
 
 jobs:
   build:
